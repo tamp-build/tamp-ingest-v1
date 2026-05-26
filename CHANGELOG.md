@@ -4,7 +4,18 @@ All notable changes to `Tamp.Ingest.V1` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — Unreleased
+## [0.1.1] — Unreleased
+
+### Added
+
+- `ScannerKind` expanded from 11 → 23 values to match the full spec §3.1 vocabulary (v1.1): added `Checkov`, `Tfsec`, `Kics`, `Zap`, `Spectral`, `Oasdiff`, `Cosign`, `NetArchTest`, `DependencyCruiser`, `Stryker`, `Coverlet`, `OsvScanner`. Wire values match the spec exactly (`netarchtest`, `dependency-cruiser`, `osv-scanner`, etc.). Purely additive; existing 0.1.0 callers are unaffected.
+- Tripwire test asserting the enum's wire-value set equals the spec's canonical list — drift now fails CI rather than silently mis-routing findings to `Unknown` sink-side.
+
+### Why
+
+Second-adopter integration (tamp framework itself) surfaced that the enum I shipped at 0.1.0 covered fewer than half the spec's scanner vocabulary. Until 0.1.1, calls using e.g. `Tamp.OsvScanner.V2`-emitted SARIF had to be tagged `ScannerKind.Unknown` and lose attribution sink-side. 0.1.1 closes that gap without disturbing any 0.1.0 call shape.
+
+## [0.1.0] — 2026-05-26
 
 ### Added
 

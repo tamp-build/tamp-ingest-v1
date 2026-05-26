@@ -7,9 +7,11 @@ namespace Tamp.Ingest.V1;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The wire value is the lowercased member name (see <see cref="ScannerKindExtensions.ToWire"/>).
-/// Sinks accept any string but flag <c>Unknown</c> for triage when an unrecognized
-/// value arrives — keep this enum in sync with the spec's <c>ScannerKind</c> vocabulary.
+/// The wire value is the spec's lowercased / hyphenated member name
+/// (see <see cref="ScannerKindExtensions.ToWire"/>).
+/// Sinks accept any string but flag <c>Unknown</c> for triage when an
+/// unrecognized value arrives — keep this enum in sync with the spec's
+/// <c>ScannerKind</c> vocabulary (spec §3.1).
 /// </para>
 /// <para>
 /// Adding a new value here is a non-breaking source change AND a non-breaking wire
@@ -33,6 +35,42 @@ public enum ScannerKind
 
     /// <summary>Aqua Trivy container / IaC / dependency scanning.</summary>
     Trivy,
+
+    /// <summary>Bridgecrew Checkov IaC scanning.</summary>
+    Checkov,
+
+    /// <summary>Aqua tfsec (deprecated upstream, still in active deployment) IaC scanning.</summary>
+    Tfsec,
+
+    /// <summary>KICS (Checkmarx) IaC scanning.</summary>
+    Kics,
+
+    /// <summary>OWASP ZAP DAST scanning.</summary>
+    Zap,
+
+    /// <summary>Stoplight Spectral API contract linting.</summary>
+    Spectral,
+
+    /// <summary>oasdiff API contract diff.</summary>
+    Oasdiff,
+
+    /// <summary>Sigstore Cosign attestation / signature verification.</summary>
+    Cosign,
+
+    /// <summary>NetArchTest .NET architecture rules.</summary>
+    NetArchTest,
+
+    /// <summary>dependency-cruiser JS / TS architecture rules.</summary>
+    DependencyCruiser,
+
+    /// <summary>Stryker mutation testing.</summary>
+    Stryker,
+
+    /// <summary>Coverlet code coverage (when emitted as findings).</summary>
+    Coverlet,
+
+    /// <summary>Google osv-scanner (CVE / advisory matching against SBOMs / lockfiles).</summary>
+    OsvScanner,
 
     /// <summary>Anchore Grype dependency vulnerability scanning.</summary>
     Grype,
@@ -62,17 +100,29 @@ public static class ScannerKindExtensions
     /// </summary>
     public static string ToWire(this ScannerKind kind) => kind switch
     {
-        ScannerKind.Unknown    => "unknown",
-        ScannerKind.OpenGrep   => "opengrep",
-        ScannerKind.TruffleHog => "trufflehog",
-        ScannerKind.CodeQL     => "codeql",
-        ScannerKind.Trivy      => "trivy",
-        ScannerKind.Grype      => "grype",
-        ScannerKind.Syft       => "syft",
-        ScannerKind.Roslyn     => "roslyn",
-        ScannerKind.ReSharper  => "resharper",
-        ScannerKind.ESLint     => "eslint",
-        ScannerKind.AxeCore    => "axe-core",
-        _                      => kind.ToString().ToLowerInvariant(),
+        ScannerKind.Unknown            => "unknown",
+        ScannerKind.OpenGrep           => "opengrep",
+        ScannerKind.TruffleHog         => "trufflehog",
+        ScannerKind.CodeQL             => "codeql",
+        ScannerKind.Trivy              => "trivy",
+        ScannerKind.Checkov            => "checkov",
+        ScannerKind.Tfsec              => "tfsec",
+        ScannerKind.Kics               => "kics",
+        ScannerKind.Zap                => "zap",
+        ScannerKind.Spectral           => "spectral",
+        ScannerKind.Oasdiff            => "oasdiff",
+        ScannerKind.Cosign             => "cosign",
+        ScannerKind.NetArchTest        => "netarchtest",
+        ScannerKind.DependencyCruiser  => "dependency-cruiser",
+        ScannerKind.Stryker            => "stryker",
+        ScannerKind.Coverlet           => "coverlet",
+        ScannerKind.OsvScanner         => "osv-scanner",
+        ScannerKind.Grype              => "grype",
+        ScannerKind.Syft               => "syft",
+        ScannerKind.Roslyn             => "roslyn",
+        ScannerKind.ReSharper          => "resharper",
+        ScannerKind.ESLint             => "eslint",
+        ScannerKind.AxeCore            => "axe-core",
+        _                              => kind.ToString().ToLowerInvariant(),
     };
 }
