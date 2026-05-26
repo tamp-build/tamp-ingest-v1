@@ -19,4 +19,9 @@
     <ProjectReference Include="..\..\src\Tamp.Ingest.V1\Tamp.Ingest.V1.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 11 golden fixtures captured from production tamp.findings sink. Round-trip them in tests. -->
+    <None Update="Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

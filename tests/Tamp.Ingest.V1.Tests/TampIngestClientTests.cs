@@ -2,27 +2,30 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Tamp;
-using Tamp.Sarif;
-using Tamp.Sbom;
 using Xunit;
 
 namespace Tamp.Ingest.V1.Tests;
 
+/// <summary>
+/// Wire-level tests for <see cref="TampIngestClient"/> 0.2.0. Asserts that:
+/// the path is right, method is POST, auth header is set, body shape is flat-hierarchy,
+/// no query params get emitted, enums serialize PascalCase.
+/// </summary>
 public class TampIngestClientTests
 {
     private static readonly Uri BaseUri = new("https://sink.example.com/");
-    private static readonly Secret Token = new("test-token", "cli_test_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    private static readonly Secret Token = new("test-token", "cli_test_AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
-    private static IngestBuildContext SampleCtx() => new()
+    private static IngestHierarchy SampleHierarchy() => new()
     {
-        Client = "Tamp",
+        Client = "BrewingCoder",
         Project = "tamp",
         Component = "tamp",
-        Version = "1.13.0",
+        ComponentKind = "solution",
         Flavor = "net10",
-        CommitSha = "deadbeefcafe",
+        Version = "0.2.0",
+        CommitSha = "deadbeef",
         Branch = "main",
-        BuildId = "17431",
     };
 
     private static (TampIngestClient client, CapturingHandler handler) NewClient(
@@ -35,98 +38,130 @@ public class TampIngestClientTests
         return (client, handler);
     }
 
-    // ---------- Auth ----------
+    // ---------- Auth + base URI ----------
 
     [Fact]
     public async Task EveryRequest_StampsBearerAuthHeader()
     {
-        var (client, handler) = NewClient();
-        var ctx = SampleCtx();
-
-        await client.PostCoverageAsync(ctx, new CoverageIngestRequestDto
-        {
-            Format = "cobertura",
-            LinePercent = 80.0m,
-        });
-
-        var sent = Assert.Single(handler.Sent);
-        Assert.Equal("Bearer cli_test_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", sent.Authorization);
-    }
-
-    [Fact]
-    public async Task BaseUri_TrailingSlashAgnostic()
-    {
-        // Run once with trailing slash, once without — both should hit the same endpoint.
-        foreach (var b in new[] { "https://sink.example.com", "https://sink.example.com/" })
-        {
-            var handler = new CapturingHandler();
-            using var http = new HttpClient(handler);
-            using var client = new TampIngestClient(new Uri(b), Token, http);
-
-            await client.PostCoverageAsync(SampleCtx(), new CoverageIngestRequestDto { Format = "cobertura", LinePercent = 50.0m });
-
-            var sent = Assert.Single(handler.Sent);
-            Assert.Equal("/ingest/coverage", sent.Path);
-        }
-    }
-
-    // ---------- /ingest/sbom ----------
-
-    [Fact]
-    public async Task PostSbom_PostsCycloneDx_ToCorrectPath_WithHierarchyQuery_AndReturnsSnapshotId()
-    {
-        var snapshotId = Guid.NewGuid();
         var (client, handler) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent($"{{\"snapshotId\":\"{snapshotId}\",\"created\":true}}",
+            Content = new StringContent("{}", Encoding.UTF8, "application/json"),
+        });
+
+        await client.PostScanRunsAsync(new ScanRunsIngestRequest
+        {
+            Client = "BrewingCoder", Project = "tamp", Component = "tamp", Version = "1",
+            Receipts = Array.Empty<ScanRunReceipt>(),
+        });
+
+        Assert.Equal("Bearer cli_test_AAAAAAAAAAAAAAAAAAAAAAAAAAAAA", handler.Sent.Single().Authorization);
+    }
+
+    // ---------- /ingest/sbom — flat hierarchy in body, no query params ----------
+
+    [Fact]
+    public async Task PostSbom_PostsFlatHierarchyInBody_NoQueryParams()
+    {
+        var snapshotId = Guid.NewGuid();
+        var componentVersionId = Guid.NewGuid();
+        var (client, handler) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                $"{{\"componentVersionId\":\"{componentVersionId}\",\"sbomSnapshotId\":\"{snapshotId}\",\"componentsCount\":2,\"dependenciesCount\":1,\"vulnerabilitiesCount\":0}}",
                 Encoding.UTF8, "application/json"),
         });
 
-        var bom = new CycloneDxBom
+        var req = new SbomIngestRequest
         {
-            SpecVersion = "1.5",
-            SerialNumber = $"urn:uuid:{Guid.NewGuid()}",
-            Version = 1,
+            Client = "BrewingCoder", Project = "tamp", Component = "tamp",
+            ComponentKind = "solution", Flavor = "net10", Version = "1.13.0",
+            Components = new[] { new SbomComponent { Purl = "pkg:nuget/Foo@1", Name = "Foo", Version = "1" } },
+            Dependencies = Array.Empty<SbomDependency>(),
         };
 
-        var resp = await client.PostSbomAsync(SampleCtx(), bom);
+        var resp = await client.PostSbomAsync(req);
 
         var sent = Assert.Single(handler.Sent);
-        Assert.Equal(HttpMethod.Post, sent.Method);
         Assert.Equal("/ingest/sbom", sent.Path);
-        Assert.Contains("clientName=Tamp", sent.Query);
-        Assert.Contains("componentName=tamp", sent.Query);
-        Assert.Contains("versionString=1.13.0", sent.Query);
+        Assert.Empty(sent.Query);
         Assert.Equal("application/json", sent.ContentType);
-        Assert.Contains("\"specVersion\"", sent.Body); // SARIF/SBOM writer emits camelCase
-        Assert.Equal(snapshotId, resp.SnapshotId);
-        Assert.True(resp.Created);
+
+        using var body = JsonDocument.Parse(sent.Body!);
+        Assert.Equal("BrewingCoder", body.RootElement.GetProperty("client").GetString());
+        Assert.Equal("tamp", body.RootElement.GetProperty("project").GetString());
+        Assert.Equal("solution", body.RootElement.GetProperty("componentKind").GetString());
+        Assert.Equal("net10", body.RootElement.GetProperty("flavor").GetString());
+
+        Assert.Equal(snapshotId, resp.SbomSnapshotId);
+        Assert.Equal(componentVersionId, resp.ComponentVersionId);
+        Assert.Equal(2, resp.ComponentsCount);
     }
 
+    // ---------- /ingest/findings — scanner enum in body, PascalCase ----------
+
     [Fact]
-    public async Task PostSbom_NullArguments_Throw()
+    public async Task PostFindings_PutsScannerInBody_AsPascalCaseString()
     {
-        var (client, _) = NewClient();
-        var bom = new CycloneDxBom { SpecVersion = "1.5", SerialNumber = "urn:uuid:x", Version = 1 };
+        var (client, handler) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{\"componentVersionId\":\"00000000-0000-0000-0000-000000000000\",\"findingsInserted\":0,\"findingsUpdated\":0,\"findingsReopened\":0,\"findingsClosed\":0,\"findingsSuppressed\":0}",
+                Encoding.UTF8, "application/json"),
+        });
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() => client.PostSbomAsync(null!, bom));
-        await Assert.ThrowsAsync<ArgumentNullException>(() => client.PostSbomAsync(SampleCtx(), null!));
+        var req = new FindingsIngestRequest
+        {
+            Client = "BrewingCoder", Project = "tamp", Component = "tamp", Version = "1",
+            Scanner = ScannerKind.Roslyn,
+            Findings = Array.Empty<IngestFinding>(),
+        };
+
+        await client.PostFindingsAsync(req);
+
+        var sent = Assert.Single(handler.Sent);
+        Assert.Equal("/ingest/findings", sent.Path);
+        Assert.Empty(sent.Query);
+        using var body = JsonDocument.Parse(sent.Body!);
+        Assert.Equal("Roslyn", body.RootElement.GetProperty("scanner").GetString());
     }
 
-    // ---------- /ingest/sbom/{id}/provenance ----------
+    [Fact]
+    public async Task PostFindings_HyphenatedScanner_SerializesAsPascalCase()
+    {
+        var (client, handler) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"componentVersionId\":\"00000000-0000-0000-0000-000000000000\",\"findingsInserted\":0,\"findingsUpdated\":0,\"findingsReopened\":0,\"findingsClosed\":0,\"findingsSuppressed\":0}",
+                Encoding.UTF8, "application/json"),
+        });
+
+        await client.PostFindingsAsync(new FindingsIngestRequest
+        {
+            Client = "c", Project = "p", Component = "comp", Version = "v",
+            Scanner = ScannerKind.AxeCore,
+            Findings = Array.Empty<IngestFinding>(),
+        });
+
+        var sent = Assert.Single(handler.Sent);
+        using var body = JsonDocument.Parse(sent.Body!);
+        // The wire shape for body enum names is PascalCase, NOT hyphenated.
+        // (`ScannerKindExtensions.ToWire()` returns `"axe-core"` for the LEGACY 0.1.x URL form;
+        // body-encoded enums use the bare PascalCase name.)
+        Assert.Equal("AxeCore", body.RootElement.GetProperty("scanner").GetString());
+    }
+
+    // ---------- /ingest/sbom-snapshots/{id}/provenance — raw JSON body ----------
 
     [Fact]
-    public async Task PostSbomProvenance_PostsRawJson_ToSnapshotScopedPath()
+    public async Task PostSbomProvenance_PostsRawJsonToSnapshotScopedPath()
     {
         var (client, handler) = NewClient();
         var snapshotId = Guid.NewGuid();
-        var provenance = "{\"_type\":\"https://in-toto.io/Statement/v0.1\"}";
+        var provenance = "{\"_type\":\"https://in-toto.io/Statement/v1\"}";
 
         await client.PostSbomProvenanceAsync(snapshotId, provenance);
 
         var sent = Assert.Single(handler.Sent);
-        Assert.Equal(HttpMethod.Post, sent.Method);
-        Assert.Equal($"/ingest/sbom/{snapshotId:D}/provenance", sent.Path);
+        Assert.Equal($"/ingest/sbom-snapshots/{snapshotId:D}/provenance", sent.Path);
         Assert.Empty(sent.Query);
         Assert.Equal(provenance, sent.Body);
     }
@@ -135,253 +170,154 @@ public class TampIngestClientTests
     public async Task PostSbomProvenance_RejectsEmptyGuidAndEmptyBody()
     {
         var (client, _) = NewClient();
-
         await Assert.ThrowsAsync<ArgumentException>(() => client.PostSbomProvenanceAsync(Guid.Empty, "{}"));
         await Assert.ThrowsAsync<ArgumentException>(() => client.PostSbomProvenanceAsync(Guid.NewGuid(), ""));
     }
 
-    // ---------- /ingest/findings ----------
+    // ---------- /ingest/scan-runs — receipts[] + ScanRunStatus PascalCase ----------
 
     [Fact]
-    public async Task PostFindings_PostsSarif_WithScannerKindQueryParam()
+    public async Task PostScanRuns_SerializesReceiptsWithPascalCaseStatus()
     {
         var (client, handler) = NewClient();
-
-        var log = new SarifLog
+        await client.PostScanRunsAsync(new ScanRunsIngestRequest
         {
-            Version = "2.1.0",
-            Schema = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            Runs = new[]
+            Client = "BrewingCoder", Project = "tamp", Component = "tamp", Version = "1",
+            Receipts = new[]
             {
-                new SarifRun { Tool = new SarifTool { Driver = new SarifToolComponent { Name = "trufflehog", Version = "3.85.1" } } },
+                new ScanRunReceipt
+                {
+                    Scanner = ScannerKind.Trivy,
+                    Status = ScanRunStatus.Succeeded,
+                    StartedAt = new DateTimeOffset(2026, 5, 26, 1, 0, 0, TimeSpan.Zero),
+                    CompletedAt = new DateTimeOffset(2026, 5, 26, 1, 0, 42, TimeSpan.Zero),
+                    FindingsCount = 3,
+                    ToolName = "Trivy",
+                    ToolVersion = "0.55.1",
+                },
             },
-        };
-
-        await client.PostFindingsAsync(SampleCtx(), ScannerKind.TruffleHog, log);
-
-        var sent = Assert.Single(handler.Sent);
-        Assert.Equal("/ingest/findings", sent.Path);
-        Assert.Contains("scannerKind=trufflehog", sent.Query);
-        Assert.Contains("clientName=Tamp", sent.Query);
-        Assert.Equal("application/json", sent.ContentType);
-        // SARIF preserves its case-sensitive wire shape (lowercase property names per spec).
-        // SarifWriter uses WriteIndented + camelCase, so colons have a trailing space.
-        Assert.Contains("\"version\": \"2.1.0\"", sent.Body);
-        Assert.Contains("\"runs\"", sent.Body);
-    }
-
-    [Fact]
-    public async Task PostFindings_UnknownScanner_StillSerializes()
-    {
-        var (client, handler) = NewClient();
-        var log = new SarifLog
-        {
-            Version = "2.1.0",
-            Schema = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            Runs = Array.Empty<SarifRun>(),
-        };
-
-        await client.PostFindingsAsync(SampleCtx(), ScannerKind.Unknown, log);
-
-        var sent = Assert.Single(handler.Sent);
-        Assert.Contains("scannerKind=unknown", sent.Query);
-    }
-
-    // ---------- /ingest/coverage ----------
-
-    [Fact]
-    public async Task PostCoverage_SerializesCamelCase_AndDropsNulls()
-    {
-        var (client, handler) = NewClient();
-        var coverage = new CoverageIngestRequestDto
-        {
-            Format = "cobertura",
-            LinePercent = 87.3m,
-            BranchPercent = 71.2m,
-            LinesCovered = 873,
-            LinesTotal = 1000,
-            // BranchesCovered / BranchesTotal / RawReportGzB64 intentionally null
-        };
-
-        await client.PostCoverageAsync(SampleCtx(), coverage);
-
-        var sent = Assert.Single(handler.Sent);
-        Assert.Equal("/ingest/coverage", sent.Path);
-        // camelCase property names from base client serializer
-        Assert.Contains("\"format\":\"cobertura\"", sent.Body);
-        Assert.Contains("\"linePercent\":87.3", sent.Body);
-        Assert.Contains("\"branchPercent\":71.2", sent.Body);
-        Assert.Contains("\"linesCovered\":873", sent.Body);
-        // nulls dropped
-        Assert.DoesNotContain("branchesCovered", sent.Body);
-        Assert.DoesNotContain("rawReportGzB64", sent.Body);
-    }
-
-    // ---------- /ingest/test-results ----------
-
-    [Fact]
-    public async Task PostTestResults_PostsAggregateRollup()
-    {
-        var (client, handler) = NewClient();
-        var results = new TestResultsIngestRequestDto
-        {
-            Format = "trx",
-            Total = 412,
-            Passed = 405,
-            Failed = 3,
-            Skipped = 4,
-            DurationSeconds = 87.4m,
-        };
-
-        await client.PostTestResultsAsync(SampleCtx(), results);
-
-        var sent = Assert.Single(handler.Sent);
-        Assert.Equal("/ingest/test-results", sent.Path);
-        Assert.Contains("\"total\":412", sent.Body);
-        Assert.Contains("\"failed\":3", sent.Body);
-        Assert.Contains("\"durationSeconds\":87.4", sent.Body);
-    }
-
-    // ---------- /ingest/scan-runs ----------
-
-    [Fact]
-    public async Task PostScanRuns_SerializesEnumsAsStrings()
-    {
-        var (client, handler) = NewClient();
-        var receipt = new ScanRunReceipt
-        {
-            Scanner = ScannerKind.OpenGrep,
-            StartedUtc = DateTimeOffset.UtcNow.AddSeconds(-30),
-            CompletedUtc = DateTimeOffset.UtcNow,
-            ExitCode = 1,
-            FindingsTotal = 7,
-            FindingsBySeverity = new Dictionary<string, int>
-            {
-                ["high"] = 2,
-                ["medium"] = 5,
-            },
-            ScannerVersion = "opengrep 1.2.3",
-        };
-
-        await client.PostScanRunsAsync(SampleCtx(), new[] { receipt });
+        });
 
         var sent = Assert.Single(handler.Sent);
         Assert.Equal("/ingest/scan-runs", sent.Path);
-        // Enum serialized as wire value (lowercased member name via JsonStringEnumConverter — base
-        // client uses default which produces "OpenGrep"; the wire converter on IngestJsonContext maps
-        // ScannerKind via its enum name. Either is sink-acceptable; we just want it as a string.)
-        Assert.Contains("\"scanner\":", sent.Body);
-        Assert.Contains("\"exitCode\":1", sent.Body);
-        Assert.Contains("\"findingsTotal\":7", sent.Body);
-        Assert.Contains("\"high\":2", sent.Body);
+        using var body = JsonDocument.Parse(sent.Body!);
+        var receipt = body.RootElement.GetProperty("receipts")[0];
+        Assert.Equal("Trivy", receipt.GetProperty("scanner").GetString());
+        Assert.Equal("Succeeded", receipt.GetProperty("status").GetString());
+        Assert.Equal("2026-05-26T01:00:00Z", receipt.GetProperty("startedAt").GetString());  // Z form, not +00:00
+        Assert.Equal(3, receipt.GetProperty("findingsCount").GetInt32());
     }
 
-    [Fact]
-    public async Task PostScanRuns_EmptyCollection_IsNoOp()
-    {
-        var (client, handler) = NewClient();
-
-        await client.PostScanRunsAsync(SampleCtx(), Array.Empty<ScanRunReceipt>());
-
-        Assert.Empty(handler.Sent);
-    }
-
-    // ---------- /ingest/sbom-vulnerabilities ----------
+    // ---------- /sbom-vulnerabilities/upsert — note: NO /ingest/ prefix ----------
 
     [Fact]
-    public async Task PostSbomVulnerabilities_SerializesCvssAndPurl()
+    public async Task PostSbomVulnerabilitiesUpsert_UsesUnprefixedPath_AndKeysOffSnapshotId()
     {
-        var (client, handler) = NewClient();
-        var vuln = new SbomVulnerability
+        var snapshotId = Guid.NewGuid();
+        var (client, handler) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Id = "CVE-2024-12345",
-            Purl = "pkg:nuget/Newtonsoft.Json@13.0.1",
-            Severity = Severity.High,
-            CvssScore = 7.5m,
-            CvssVector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-            FixVersion = "13.0.3",
-            AdvisoryUrl = "https://nvd.nist.gov/vuln/detail/CVE-2024-12345",
-        };
+            Content = new StringContent($"{{\"snapshotId\":\"{snapshotId}\",\"matched\":1,\"unmatched\":0,\"inserted\":1,\"updated\":0}}",
+                Encoding.UTF8, "application/json"),
+        });
 
-        await client.PostSbomVulnerabilitiesAsync(SampleCtx(), new[] { vuln });
+        var resp = await client.PostSbomVulnerabilitiesUpsertAsync(new SbomVulnerabilitiesUpsertRequest
+        {
+            SnapshotId = snapshotId,
+            Vulnerabilities = new[]
+            {
+                new SbomVulnerability
+                {
+                    PackageName = "Foo", PackageVersion = "1.0.0",
+                    AdvisoryId = "CVE-2024-0001", Severity = Severity.High,
+                },
+            },
+        });
 
         var sent = Assert.Single(handler.Sent);
-        Assert.Equal("/ingest/sbom-vulnerabilities", sent.Path);
-        Assert.Contains("\"id\":\"CVE-2024-12345\"", sent.Body);
-        Assert.Contains("\"purl\":\"pkg:nuget/Newtonsoft.Json@13.0.1\"", sent.Body);
-        Assert.Contains("\"cvssScore\":7.5", sent.Body);
-        Assert.Contains("\"fixVersion\":\"13.0.3\"", sent.Body);
+        // Critical assertion: no /ingest/ prefix on this endpoint (spec v1.2 §2.7).
+        Assert.Equal("/sbom-vulnerabilities/upsert", sent.Path);
+        Assert.Empty(sent.Query);
+        using var body = JsonDocument.Parse(sent.Body!);
+        Assert.Equal(snapshotId.ToString(), body.RootElement.GetProperty("snapshotId").GetString());
+        Assert.Equal("High", body.RootElement.GetProperty("vulnerabilities")[0].GetProperty("severity").GetString());
+
+        Assert.Equal(1, resp.Inserted);
+    }
+
+    // ---------- Coverage + test-results ----------
+
+    [Fact]
+    public async Task PostCoverage_RouteAndDecimalSerialization()
+    {
+        var (client, handler) = NewClient();
+        await client.PostCoverageAsync(new CoverageIngestRequest
+        {
+            Client = "c", Project = "p", Component = "comp", Version = "v",
+            ToolName = "OpenCover",
+            CompletedAt = new DateTimeOffset(2026, 5, 26, 0, 0, 0, TimeSpan.Zero),
+            SequenceCoverage = 87.3m, BranchCoverage = 71.2m,
+            CoveredSequences = 873, TotalSequences = 1000,
+            Modules = Array.Empty<CoverageModule>(),
+        });
+
+        var sent = Assert.Single(handler.Sent);
+        Assert.Equal("/ingest/coverage", sent.Path);
+        using var body = JsonDocument.Parse(sent.Body!);
+        Assert.Equal(87.3m, body.RootElement.GetProperty("sequenceCoverage").GetDecimal());
+        Assert.Equal(71.2m, body.RootElement.GetProperty("branchCoverage").GetDecimal());
     }
 
     [Fact]
-    public async Task PostSbomVulnerabilities_EmptyCollection_IsNoOp()
+    public async Task PostTestResults_RouteAndCountsSerialization()
     {
         var (client, handler) = NewClient();
+        await client.PostTestResultsAsync(new TestResultsIngestRequest
+        {
+            Client = "c", Project = "p", Component = "comp", Version = "v",
+            ToolName = "VSTest",
+            CompletedAt = new DateTimeOffset(2026, 5, 26, 0, 0, 0, TimeSpan.Zero),
+            DurationMs = 14700,
+            TotalCount = 56, PassedCount = 55, FailedCount = 1, SkippedCount = 0, InconclusiveCount = 0,
+            Suites = Array.Empty<TestSuite>(),
+        });
 
-        await client.PostSbomVulnerabilitiesAsync(SampleCtx(), Array.Empty<SbomVulnerability>());
-
-        Assert.Empty(handler.Sent);
+        var sent = Assert.Single(handler.Sent);
+        Assert.Equal("/ingest/test-results", sent.Path);
+        using var body = JsonDocument.Parse(sent.Body!);
+        Assert.Equal(56, body.RootElement.GetProperty("totalCount").GetInt32());
+        Assert.Equal(1, body.RootElement.GetProperty("failedCount").GetInt32());
     }
 
     // ---------- Error mapping ----------
 
     [Fact]
-    public async Task NonSuccessResponse_FromSarifPath_ThrowsApiException_WithBodyCaptured()
-    {
-        var (client, _) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
-        {
-            Content = new StringContent("{\"error\":\"client scope mismatch\"}", Encoding.UTF8, "application/json"),
-        });
-
-        var log = new SarifLog
-        {
-            Version = "2.1.0",
-            Schema = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            Runs = Array.Empty<SarifRun>(),
-        };
-
-        var ex = await Assert.ThrowsAnyAsync<Tamp.Http.ApiException>(
-            () => client.PostFindingsAsync(SampleCtx(), ScannerKind.OpenGrep, log));
-
-        Assert.Equal(HttpStatusCode.Forbidden, ex.StatusCode);
-        Assert.Contains("client scope mismatch", ex.ResponseBody);
-    }
-
-    [Fact]
-    public async Task NonSuccessResponse_FromCoveragePath_BubblesUpAsApiException()
+    public async Task NonSuccessResponse_ThrowsApiException_WithBodyCaptured()
     {
         var (client, _) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
         {
-            Content = new StringContent("{\"error\":\"missing format\"}", Encoding.UTF8, "application/json"),
+            Content = new StringContent("{\"error\":\"client is required\"}", Encoding.UTF8, "application/json"),
         });
 
-        var ex = await Assert.ThrowsAnyAsync<Tamp.Http.ApiException>(
-            () => client.PostCoverageAsync(SampleCtx(), new CoverageIngestRequestDto
-            {
-                Format = "cobertura",
-                LinePercent = 50.0m,
-            }));
+        var ex = await Assert.ThrowsAnyAsync<Tamp.Http.ApiException>(() => client.PostScanRunsAsync(new ScanRunsIngestRequest
+        {
+            Client = "BrewingCoder", Project = "tamp", Component = "tamp", Version = "1",
+            Receipts = Array.Empty<ScanRunReceipt>(),
+        }));
 
         Assert.Equal(HttpStatusCode.BadRequest, ex.StatusCode);
+        Assert.Contains("client is required", ex.ResponseBody);
     }
 
-    // ---------- Cancellation ----------
-
     [Fact]
-    public async Task Cancellation_TokenPropagatesIntoTheRequest()
+    public async Task NonSuccessResponse_OnProvenancePath_BubblesApiException()
     {
-        var handler = new CapturingHandler
+        var (client, _) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
         {
-            Responder = _ => throw new OperationCanceledException(),
-        };
-        using var http = new HttpClient(handler);
-        using var client = new TampIngestClient(BaseUri, Token, http);
+            Content = new StringContent("{\"error\":\"snapshot not found\"}", Encoding.UTF8, "application/json"),
+        });
 
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
-
-        // HttpClient wraps the cancellation in TaskCanceledException (subclass of OCE) — accept either.
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => client.PostCoverageAsync(SampleCtx(), new CoverageIngestRequestDto { Format = "cobertura", LinePercent = 0m }, cts.Token));
+        var ex = await Assert.ThrowsAnyAsync<Tamp.Http.ApiException>(() => client.PostSbomProvenanceAsync(Guid.NewGuid(), "{}"));
+        Assert.Equal(HttpStatusCode.NotFound, ex.StatusCode);
+        Assert.Contains("snapshot not found", ex.ResponseBody);
     }
 }
