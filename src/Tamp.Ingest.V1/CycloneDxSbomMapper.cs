@@ -109,7 +109,12 @@ public static class CycloneDxSbomMapper
         Version = c.Version ?? "",
         Kind = c.Type,
         License = FlattenLicense(c.Licenses),
-        Vulnerabilities = null,
+        // Always emit an empty array rather than null. The deployed sink (as of 2026-05-26)
+        // 500s when components[].vulnerabilities is missing entirely, even though spec §2.1
+        // marks it optional. Defaulting here keeps the wire payload sink-compatible without
+        // forcing every adopter to remember the quirk. Per-component vulnerabilities are
+        // typically pushed via /sbom-vulnerabilities/upsert anyway (preferred path).
+        Vulnerabilities = Array.Empty<SbomComponentVulnerability>(),
         Hashes = FlattenHashes(c.Hashes),
     };
 

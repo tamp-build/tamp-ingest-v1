@@ -4,7 +4,13 @@ All notable changes to `Tamp.Ingest.V1` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — Unreleased
+## [0.2.1] — Unreleased
+
+### Fixed
+
+- **`CycloneDxSbomMapper.BuildRequest` now emits `components[].vulnerabilities: []`** on every mapped component (rather than dropping the field as null). The deployed tamp.findings sink as of 2026-05-26 returns 500 (empty body) when `vulnerabilities` is missing, even though spec §2.1 marks it optional. Defaulting here keeps the wire payload sink-compatible without forcing every adopter to remember the quirk. Per-component vulnerabilities are typically pushed via `/sbom-vulnerabilities/upsert` anyway. Surfaced during the tamp framework's first live ingest run against `tamp-findings.brewingcoder.com`.
+
+## [0.2.0] — 2026-05-26
 
 ### Changed — BREAKING
 
