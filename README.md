@@ -4,7 +4,9 @@
 
 | Package | Status |
 |---|---|
-| `Tamp.Ingest.V1` | 0.1.0 (initial) |
+| `Tamp.Ingest.V1` | 0.2.0 — aligned with v1.2 spec + golden fixtures |
+
+> **0.2.0 is a breaking rewrite.** Pre-0.2.0 wire shapes were built against spec v1.0/v1.1, which v1.2 retracted; the deployed sink never accepted them. See [CHANGELOG](CHANGELOG.md#020--unreleased) for migration notes. 0.1.x callers must update.
 
 ## Install
 
@@ -12,7 +14,7 @@
 dotnet add package Tamp.Ingest.V1
 ```
 
-Multi-targets net8 / net9 / net10. Pulls in `Tamp.Http` (auth + base HTTP client), `Tamp.Sarif` (findings type graph), and `Tamp.Sbom` (CycloneDX type graph) — the latter two so SARIF + SBOM bodies serialize via the canonical writers rather than the base client's generic JSON path.
+Multi-targets net8 / net9 / net10. Depends on `Tamp.Http` (auth + base HTTP client), `Tamp.Sarif` (typed SARIF model), `Tamp.Sbom` (CycloneDX type graph). The SARIF + SBOM models are inputs to the mapper helpers — the sink itself doesn't speak raw SARIF / CycloneDX, it speaks normalized DTOs that the mappers reshape into.
 
 ## When to use this
 
@@ -26,66 +28,82 @@ The Tamp framework itself does **not** import this package — the contract is i
 using Tamp;
 using Tamp.Ingest.V1;
 using Tamp.Sarif;
+using Tamp.Sbom;
 
 // One client per build, one bearer token (cli_… or prj_…).
 using var ingest = new TampIngestClient(
     new Uri("https://tamp-findings.brewingcoder.com"),
     new Secret("ingest-token", Environment.GetEnvironmentVariable("TAMP_INGEST_TOKEN")!));
 
-// The hierarchy tuple identifies every payload below.
-var ctx = new IngestBuildContext
+// The hierarchy tuple identifies every payload below. Same shape across every endpoint.
+var hierarchy = new IngestHierarchy
 {
     Client = "Tamp",
     Project = "tamp",
     Component = "tamp",
-    Version = "1.13.0",
+    ComponentKind = "solution",
     Flavor = "net10",
+    Version = "1.13.0",
     CommitSha = Environment.GetEnvironmentVariable("GITHUB_SHA"),
     Branch = Environment.GetEnvironmentVariable("GITHUB_REF_NAME"),
     BuildId = Environment.GetEnvironmentVariable("GITHUB_RUN_ID"),
 };
 
-// Push a SARIF file produced by a scanner (e.g. Tamp.OpenGrep / Tamp.Trivy).
-var sarif = SarifReader.ReadFromFile("artifacts/security/opengrep.sarif");
-await ingest.PostFindingsAsync(ctx, ScannerKind.OpenGrep, sarif);
+// 1. Push the SBOM (the sink stores it as a snapshot; you get the snapshot id back).
+var bom = SbomReader.LoadFromFile("artifacts/security/tamp.cdx.json");
+var sbomResponse = await ingest.PostSbomAsync(hierarchy, bom, toolName: "syft", toolVersion: "1.42.0");
 
-// Push the aggregate coverage rollup.
-await ingest.PostCoverageAsync(ctx, new CoverageIngestRequestDto
+// 2. Push SARIF findings per scanner — the typed client maps SARIF to the flat findings[] shape.
+var sarif = SarifReader.LoadFromFile("artifacts/security/opengrep.sarif");
+await ingest.PostFindingsAsync(hierarchy, ScannerKind.OpenGrep, sarif);
+
+// 3. Push scan-run receipts (so the sink can render "ran clean" vs "never ran").
+await ingest.PostScanRunsAsync(new ScanRunsIngestRequest
 {
-    Format = "cobertura",
-    LinePercent = 87.3m,
-    BranchPercent = 71.2m,
+    Client = hierarchy.Client, Project = hierarchy.Project, Component = hierarchy.Component,
+    ComponentKind = hierarchy.ComponentKind, Flavor = hierarchy.Flavor, Version = hierarchy.Version,
+    CommitSha = hierarchy.CommitSha, Branch = hierarchy.Branch,
+    Receipts = new[]
+    {
+        new ScanRunReceipt
+        {
+            Scanner = ScannerKind.OpenGrep, Status = ScanRunStatus.Succeeded,
+            StartedAt = startedUtc, CompletedAt = DateTimeOffset.UtcNow,
+            FindingsCount = 0, ToolName = "opengrep", ToolVersion = "1.22.0",
+        },
+    },
 });
 
-// Push the per-scanner receipt set so the sink's "last scan" board stays current.
-await ingest.PostScanRunsAsync(ctx, new[]
+// 4. (Optional) Stream OSV-Scanner vulns against the SBOM snapshot you just pushed.
+await ingest.PostSbomVulnerabilitiesUpsertAsync(new SbomVulnerabilitiesUpsertRequest
 {
-    new ScanRunReceipt
-    {
-        Scanner = ScannerKind.OpenGrep,
-        StartedUtc = startedUtc,
-        CompletedUtc = DateTimeOffset.UtcNow,
-        ExitCode = 0,
-        FindingsTotal = 0,
-    },
+    SnapshotId = sbomResponse.SbomSnapshotId,
+    Vulnerabilities = osvVulns.Select(v => new SbomVulnerability { /* ... */ }).ToArray(),
 });
 ```
 
 ## Endpoint surface
 
-Every method takes an `IngestBuildContext` (encoded as query params; `clientName` / `projectName` / `componentName` / `versionString` plus optional `flavorName` / `commitSha` / `branchName` / `pullRequestRef` / `buildId`) — except the snapshot-scoped provenance endpoint.
+Every endpoint takes the flat hierarchy tuple inline in the body. No query params anywhere.
 
-| Method | HTTP | Path | Body |
+| Method | HTTP | Path | Body root |
 |---|---|---|---|
-| `PostSbomAsync` | POST | `/ingest/sbom` | CycloneDX BOM (via `SbomWriter`) → returns `SbomSnapshotResponse` |
-| `PostSbomProvenanceAsync` | POST | `/ingest/sbom/{snapshotId}/provenance` | raw SLSA / in-toto provenance JSON |
-| `PostFindingsAsync` | POST | `/ingest/findings` | SARIF 2.1.0 (via `SarifWriter`); adds `&scannerKind=<kind>` |
-| `PostCoverageAsync` | POST | `/ingest/coverage` | `CoverageIngestRequestDto` |
-| `PostTestResultsAsync` | POST | `/ingest/test-results` | `TestResultsIngestRequestDto` |
-| `PostScanRunsAsync` | POST | `/ingest/scan-runs` | `IReadOnlyList<ScanRunReceipt>` (no-op when empty) |
-| `PostSbomVulnerabilitiesAsync` | POST | `/ingest/sbom-vulnerabilities` | `IReadOnlyList<SbomVulnerability>` (no-op when empty) |
+| `PostSbomAsync` | POST | `/ingest/sbom` | `SbomIngestRequest` (hierarchy + `components[]` + `dependencies[]`) → `SbomIngestResponse` |
+| `PostSbomProvenanceAsync` | POST | `/ingest/sbom-snapshots/{snapshotId}/provenance` | Raw SLSA / in-toto / DSSE provenance JSON |
+| `PostFindingsAsync` | POST | `/ingest/findings` | `FindingsIngestRequest` (hierarchy + `scanner` + `findings[]`) → `FindingsIngestResponse` |
+| `PostCoverageAsync` | POST | `/ingest/coverage` | `CoverageIngestRequest` (hierarchy + `modules[].classes[]` tree) |
+| `PostTestResultsAsync` | POST | `/ingest/test-results` | `TestResultsIngestRequest` (hierarchy + `suites[].cases[]` tree) |
+| `PostScanRunsAsync` | POST | `/ingest/scan-runs` | `ScanRunsIngestRequest` (hierarchy + `receipts[]`) |
+| `PostSbomVulnerabilitiesUpsertAsync` | POST | `/sbom-vulnerabilities/upsert` *(no `/ingest/` prefix)* | `SbomVulnerabilitiesUpsertRequest` (`snapshotId` + `vulnerabilities[]`) → `SbomVulnerabilitiesUpsertResponse` |
 
-`POST` collection endpoints are intentionally no-op on empty input — caller doesn't need to guard.
+## Mapper helpers
+
+The sink doesn't speak raw SARIF or raw CycloneDX. Two static mapper helpers do the reshape:
+
+- **`CycloneDxSbomMapper`** — `FromCycloneDx(bom)` returns `(components[], dependencies[])`; `BuildRequest(hierarchy, bom, toolName?, toolVersion?, metadataTools?)` returns a complete `SbomIngestRequest`. Resolves CycloneDX `bom-ref → purl` dependency edges; flattens multi-license `licenses[]` to the first non-null SPDX expression; flattens `hashes[]` to a `{algorithm: content}` dict.
+- **`SarifFindingsMapper`** — `FromSarif(log, defaultSubCategory?)` returns the flat `IngestFinding[]`; `BuildRequest(hierarchy, scanner, log, defaultSubCategory?)` returns a complete `FindingsIngestRequest`. Maps SARIF `level` (`error/warning/note/none`) → `Severity` (`High/Medium/Low/Info`). Trims `title` to first line + ≤ 512 chars.
+
+Both mappers are testable independent of the HTTP client, so you can validate the reshape against an on-disk fixture before going on the wire.
 
 ## The hierarchy tuple
 
@@ -94,15 +112,16 @@ Client → Project → Component → ComponentVersion
                                   └── Flavor (optional, e.g. net10 / web / backend)
 ```
 
-- `Client` is enforced against the bearer token's bound client scope. A `cli_` token authorizes ingest under any project beneath ONE client; a `prj_` token is project-scoped.
-- `Project` / `Component` are upserted on first ingest — no out-of-band registration needed.
-- `Branch` = `main` / `master` is treated as canonical by sinks; others as non-canonical.
-- `PullRequestRef` set ⇒ the build is preview-scoped and does NOT count as canonical.
+- `Client` must already exist sink-side — it's the bearer-token's scope anchor, not auto-created. `cli_…` tokens authorize ingest under any project beneath ONE client (token's `client` field must match the body's). `prj_…` tokens are project-scoped.
+- `Project` / `Component` / `Flavor` / `ComponentVersion` are upserted on first ingest.
+- `Branch = main` / `master` is canonical; others non-canonical.
+- `PullRequestRef` set ⇒ the build is preview-scoped (non-canonical).
 
-## Bodies: how serialization works
+## Wire-shape canon
 
-- **SARIF / SBOM** bodies are produced by `SarifWriter.Serialize(log)` / `SbomWriter.Serialize(bom)` and shipped as pre-formed JSON. This preserves the case-sensitive wire shape both standards require (e.g. SARIF's `$schema`, lowercase property names).
-- **All other DTOs** (coverage, test-results, scan-runs, sbom-vulnerabilities) serialize via the inherited `TampApiClient` JSON path: camelCase property names, `null` values dropped. `Severity` / `ScannerKind` enums serialize as strings.
+- All bodies serialize via `IngestJsonOptions.Default`: camelCase property names, drop-nulls, PascalCase string enums, UTC `Z` timestamps (matches the v1.2 golden fixtures).
+- `Severity`, `ScannerKind`, `ScanRunStatus`, `TestOutcome` all emit as bare PascalCase enum names (e.g. `"Roslyn"`, `"Succeeded"`, `"High"`).
+- Round-trip tested against all 11 golden fixtures at <https://github.com/tamp-build/tamp-findings/tree/main/tests/Fixtures/Ingest/v1>.
 
 ## Auth
 
@@ -120,31 +139,35 @@ Failed responses surface as `Tamp.Http.ApiException`:
 - 4xx → `Tamp.Http.ApiClientException` (caller fault; don't retry without changing the request)
 - 5xx → `Tamp.Http.ApiServerException` (`IsTransient == true`; safe to retry with backoff)
 
-The response body is captured and exposed on `ResponseBody` (truncated above `MaxCapturedErrorBodyBytes`, default 16 KiB).
+Response body is captured on `ResponseBody` (truncated above `MaxCapturedErrorBodyBytes`, default 16 KiB). Sink emits RFC 9457 `application/problem+json` on framework-level rejections; validator-level 400s return a JSON string body.
 
 ## Adopter pattern — wiring into a Build.cs
 
 ```csharp
 Target Ingest => _ => _
-    .DependsOn(nameof(Security))   // SARIF + scan-run files already on disk
+    .DependsOn(nameof(Security))   // SARIF + SBOM files already on disk
     .Requires(() => IngestToken != null)
     .Executes(async () =>
     {
         using var ingest = new TampIngestClient(IngestBaseUri, IngestToken);
-        var ctx = new IngestBuildContext
+        var hierarchy = new IngestHierarchy
         {
-            Client = "MyClient", Project = "my-project",
-            Component = ComponentName, Version = GitVersion.NuGetVersionV2,
-            Flavor = NetFlavor, CommitSha = Git.Commit,
-            Branch = Git.Branch, BuildId = Environment.GetEnvironmentVariable("GITHUB_RUN_ID"),
+            Client = "MyClient", Project = "my-project", Component = ComponentName,
+            ComponentKind = "solution", Flavor = NetFlavor, Version = GitVersion.NuGetVersionV2,
+            CommitSha = Git.Commit, Branch = Git.Branch,
+            BuildId = Environment.GetEnvironmentVariable("GITHUB_RUN_ID"),
         };
 
-        foreach (var sarif in (Artifacts / "security").GlobFiles("*.sarif"))
+        var bom = SbomReader.LoadFromFile(SecuritySbomFile);
+        var sbomResp = await ingest.PostSbomAsync(hierarchy, bom);
+
+        foreach (var sarifPath in (Artifacts / "security").GlobFiles("*.sarif"))
         {
-            var scanner = ResolveScannerFromFileName(sarif);
-            await ingest.PostFindingsAsync(ctx, scanner, SarifReader.ReadFromFile(sarif));
+            var scanner = ResolveScannerFromFileName(sarifPath);
+            var log = SarifReader.LoadFromFile(sarifPath);
+            await ingest.PostFindingsAsync(hierarchy, scanner, log);
         }
-        await ingest.PostScanRunsAsync(ctx, LoadReceipts());
+        await ingest.PostScanRunsAsync(BuildReceiptsRequest(hierarchy));
     });
 ```
 
