@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>Tamp.Ingest.V1</RootNamespace>
+    <AssemblyName>Tamp.Ingest.V1</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package">
+    <PackageId>Tamp.Ingest.V1</PackageId>
+    <Description>Typed C# client + DTOs for the tamp-ingest-v1 egress contract — the canonical wire shape any Tamp.Security.Pipeline-driven build pushes to a compliant dashboard / defect tracker / evidence vault. First server-side consumer: tamp.findings. Wraps the seven ingest endpoints (SBOM / provenance / findings / coverage / test results / scan runs / vulnerabilities) as Async methods on TampIngestClient (derived from Tamp.Http.TampApiClient). Hierarchy tuple (Client → Project → Component → ComponentVersion + Flavor / Branch / PullRequestRef) modelled as the IngestBuildContext record.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(TampCorePath)" Condition="'$(TampCoreMode)' == 'project'" />
+    <PackageReference Include="Tamp.Core" Condition="'$(TampCoreMode)' == 'package'" />
+    <PackageReference Include="Tamp.Http" />
+    <PackageReference Include="Tamp.Sarif" />
+    <PackageReference Include="Tamp.Sbom" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+  </ItemGroup>
+
+</Project>
