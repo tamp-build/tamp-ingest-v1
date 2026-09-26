@@ -190,6 +190,19 @@ public class FixtureRoundTripTests
         Assert.True(doc.RootElement.TryGetProperty("payloadType", out _));
     }
 
+    [Fact]
+    public void Fixture_12_TestResultsWithActor_DeserializesAndReserializesStructurally()
+    {
+        var original = ReadFixture("12-test-results-with-actor-request.json");
+        var req = JsonSerializer.Deserialize<TestResultsIngestRequest>(original, IngestJsonOptions.Default)!;
+
+        Assert.NotNull(req.Actor);
+        Assert.Equal("pool/3", req.Actor!.Id);
+        Assert.Equal(ActorKind.Agent, req.Actor.Kind);
+
+        AssertStructurallyEqual(original, req);   // v1.3 actor block round-trips with no drift
+    }
+
     /// <summary>
     /// Re-serialize <paramref name="reserialized"/> via the canonical options and
     /// assert it structurally equals <paramref name="originalJson"/> (key sets +

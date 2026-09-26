@@ -48,4 +48,7 @@ public sealed record IngestHierarchy
 
     /// <summary>PR reference. When set, the build is preview-scoped (non-canonical).</summary>
     public string? PullRequestRef { get; init; }
+
+    /// <summary>Who produced this build — agent or human (spec v1.3). Optional; dropped on the wire when absent.</summary>
+    public IngestActor? Actor { get; init; }
 }

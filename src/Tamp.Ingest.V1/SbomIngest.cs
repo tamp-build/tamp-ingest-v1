@@ -22,6 +22,9 @@ public sealed record SbomIngestRequest
     public string? BuildId { get; init; }
     public string? PullRequestRef { get; init; }
 
+    /// <summary>Who produced this build — agent or human (spec v1.3). Optional; dropped on the wire when absent.</summary>
+    public IngestActor? Actor { get; init; }
+
     // SBOM provenance (optional)
     /// <summary>CycloneDX <c>serialNumber</c> (e.g. <c>"urn:uuid:..."</c>).</summary>
     public string? SerialNumber { get; init; }

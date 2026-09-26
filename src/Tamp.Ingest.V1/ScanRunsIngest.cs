@@ -18,6 +18,9 @@ public sealed record ScanRunsIngestRequest
     public string? BuildId { get; init; }
     public string? PullRequestRef { get; init; }
 
+    /// <summary>Who produced this build — agent or human (spec v1.3). Optional; dropped on the wire when absent.</summary>
+    public IngestActor? Actor { get; init; }
+
     /// <summary>One receipt per scanner that ran (including <see cref="ScanRunStatus.Skipped"/> ones).</summary>
     public required IReadOnlyList<ScanRunReceipt> Receipts { get; init; }
 }
