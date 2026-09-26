@@ -23,6 +23,9 @@ public sealed record FindingsIngestRequest
     public string? BuildId { get; init; }
     public string? PullRequestRef { get; init; }
 
+    /// <summary>Who produced this build — agent or human (spec v1.3). Optional; dropped on the wire when absent.</summary>
+    public IngestActor? Actor { get; init; }
+
     /// <summary>The scanner that produced the findings. PascalCase enum on the wire.</summary>
     public required ScannerKind Scanner { get; init; }
 

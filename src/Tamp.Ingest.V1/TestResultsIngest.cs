@@ -18,6 +18,9 @@ public sealed record TestResultsIngestRequest
     public string? BuildId { get; init; }
     public string? PullRequestRef { get; init; }
 
+    /// <summary>Who produced this build — agent or human (spec v1.3). Optional; dropped on the wire when absent.</summary>
+    public IngestActor? Actor { get; init; }
+
     /// <summary>Producing tool (<c>"VSTest"</c>, <c>"vitest"</c>, <c>"junit"</c>).</summary>
     public required string ToolName { get; init; }
     public string? ToolVersion { get; init; }
