@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [0.2.1] — Unreleased
 
+### Added
+
+- Package now ships XML documentation files (`.xml`) alongside the assembly, so consumers get IntelliSense and API docs. (Mirrors [tamp-build/tamp#3](https://github.com/tamp-build/tamp/pull/50).)
+
 ### Fixed
 
 - **`CycloneDxSbomMapper.BuildRequest` now emits `components[].vulnerabilities: []`** on every mapped component (rather than dropping the field as null). The deployed tamp.findings sink as of 2026-05-26 returns 500 (empty body) when `vulnerabilities` is missing, even though spec §2.1 marks it optional. Defaulting here keeps the wire payload sink-compatible without forcing every adopter to remember the quirk. Per-component vulnerabilities are typically pushed via `/sbom-vulnerabilities/upsert` anyway. Surfaced during the tamp framework's first live ingest run against `tamp-findings.brewingcoder.com`.
