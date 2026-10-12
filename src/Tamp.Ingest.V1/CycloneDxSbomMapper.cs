@@ -26,13 +26,26 @@ namespace Tamp.Ingest.V1;
 public static class CycloneDxSbomMapper
 {
     /// <summary>Map the BOM graph (components + dependencies) only, without hierarchy or provenance.</summary>
-    public static (IReadOnlyList<SbomComponent> Components, IReadOnlyList<SbomDependency> Dependencies) FromCycloneDx(CycloneDxBom bom)
+    /// <param name="bom">The source CycloneDX BOM.</param>
+    /// <param name="isDevDependency">
+    /// Optional producer classifier. When supplied, each mapped component's
+    /// <see cref="SbomComponent.DevDependency"/> is set to its result (so every component carries an
+    /// explicit <c>true</c>/<c>false</c>). When null, the flag is left unset (omitted on the wire).
+    /// The mapper only sees the package graph, so compute dev-vs-shipping from the build (e.g. per-project
+    /// <c>project.assets.json</c>: shipping = packable libs; dev = test projects + <c>DevelopmentDependency</c>
+    /// / <c>PrivateAssets=all</c> / analyzer closures) and pass it here.
+    /// </param>
+    public static (IReadOnlyList<SbomComponent> Components, IReadOnlyList<SbomDependency> Dependencies) FromCycloneDx(
+        CycloneDxBom bom, Func<SbomComponent, bool>? isDevDependency = null)
     {
         if (bom is null) throw new ArgumentNullException(nameof(bom));
 
         var components = (bom.Components ?? Array.Empty<CycloneDxComponent>())
             .Select(MapComponent)
             .ToList();
+
+        if (isDevDependency is not null)
+            components = components.Select(c => c with { DevDependency = isDevDependency(c) }).ToList();
 
         // bom-ref → purl table for dependency-edge resolution.
         var refToPurl = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -73,12 +86,13 @@ public static class CycloneDxSbomMapper
         CycloneDxBom bom,
         string? toolName = null,
         string? toolVersion = null,
-        IReadOnlyList<SbomMetadataTool>? metadataTools = null)
+        IReadOnlyList<SbomMetadataTool>? metadataTools = null,
+        Func<SbomComponent, bool>? isDevDependency = null)
     {
         if (hierarchy is null) throw new ArgumentNullException(nameof(hierarchy));
         if (bom is null) throw new ArgumentNullException(nameof(bom));
 
-        var (components, dependencies) = FromCycloneDx(bom);
+        var (components, dependencies) = FromCycloneDx(bom, isDevDependency);
 
         return new SbomIngestRequest
         {
