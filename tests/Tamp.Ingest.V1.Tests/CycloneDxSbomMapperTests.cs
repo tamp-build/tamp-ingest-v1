@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Text.Json;
 using Tamp.Sbom;
 using Xunit;
 
@@ -163,5 +165,59 @@ public class CycloneDxSbomMapperTests
         var bom = new CycloneDxBom();
         Assert.Throws<ArgumentNullException>(() => CycloneDxSbomMapper.BuildRequest(null!, bom));
         Assert.Throws<ArgumentNullException>(() => CycloneDxSbomMapper.BuildRequest(SampleHierarchy(), null!));
+    }
+
+    // ---- #8: dev/build-only marking (devDependency) ----
+
+    private static CycloneDxBom TwoComponentBom() => new()
+    {
+        Components = new[]
+        {
+            new CycloneDxComponent { BomRef = "Lib@1.0.0", Purl = "pkg:nuget/Lib@1.0.0", Name = "Lib", Version = "1.0.0", Type = "library" },
+            new CycloneDxComponent { BomRef = "xunit@2.9.2", Purl = "pkg:nuget/xunit@2.9.2", Name = "xunit", Version = "2.9.2", Type = "library" },
+        },
+    };
+
+    [Fact]
+    public void DevDependency_IsNull_WhenNoClassifierGiven()
+    {
+        var (components, _) = CycloneDxSbomMapper.FromCycloneDx(TwoComponentBom());
+        Assert.All(components, c => Assert.Null(c.DevDependency));
+    }
+
+    [Fact]
+    public void DevDependency_IsSetExplicitly_ForEveryComponent_WhenClassifierGiven()
+    {
+        // Producer classifier: anything named like a test package is dev, everything else ships.
+        var (components, _) = CycloneDxSbomMapper.FromCycloneDx(
+            TwoComponentBom(), c => c.Name.StartsWith("xunit", System.StringComparison.OrdinalIgnoreCase));
+
+        var lib = components.Single(c => c.Name == "Lib");
+        var xunit = components.Single(c => c.Name == "xunit");
+        Assert.False(lib.DevDependency);   // explicit false (shipping) — not null
+        Assert.True(xunit.DevDependency);  // explicit true (dev-only)
+    }
+
+    [Fact]
+    public void DevDependency_SerializesCamelCase_AndOmitsWhenNull()
+    {
+        var (withClassifier, _) = CycloneDxSbomMapper.FromCycloneDx(
+            TwoComponentBom(), c => c.Name == "xunit");
+        var json = JsonSerializer.Serialize(withClassifier, IngestJsonOptions.Default);
+        Assert.Contains("\"devDependency\":true", json);
+        Assert.Contains("\"devDependency\":false", json);
+
+        var (noClassifier, _) = CycloneDxSbomMapper.FromCycloneDx(TwoComponentBom());
+        var jsonNull = JsonSerializer.Serialize(noClassifier, IngestJsonOptions.Default);
+        Assert.DoesNotContain("devDependency", jsonNull); // omitted (WhenWritingNull)
+    }
+
+    [Fact]
+    public void BuildRequest_PassesClassifierThrough()
+    {
+        var req = CycloneDxSbomMapper.BuildRequest(
+            SampleHierarchy(), TwoComponentBom(), isDevDependency: c => c.Name == "xunit");
+        Assert.True(req.Components.Single(c => c.Name == "xunit").DevDependency);
+        Assert.False(req.Components.Single(c => c.Name == "Lib").DevDependency);
     }
 }

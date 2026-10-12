@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-12
+
+### Added
+
+- **`SbomComponent.DevDependency`** (`bool?`, camelCase `devDependency`) — marks a dev/build-only component (test SDKs, analyzer closures like `Microsoft.NETCore.Platforms`, `System.*` shims) vs something that ships. Drives tamp-findings' SBOM-staleness **VEX exemption** (TFND-226). Nullable + omitted when unset, so adopters who don't classify are unaffected.
+- **`CycloneDxSbomMapper.FromCycloneDx` / `BuildRequest`** take an optional `Func<SbomComponent,bool>? isDevDependency` classifier. When supplied, every mapped component gets an explicit `DevDependency` (true/false). The mapper sees only the package graph, so dev-vs-shipping is **producer input** — compute it from the build (per-project `project.assets.json`: shipping = packable libs; dev = test projects + `DevelopmentDependency`/`PrivateAssets=all`/analyzer closures) and pass the predicate.
+
+Closes [#8](https://github.com/tamp-build/tamp-ingest-v1/issues/8). This retires the hand-rolled `/ingest/sbom` POST in tamp-core's findings-ingest nightly (which ported the classifier + wire shape as a stopgap); it can go back to `PostSbomAsync`.
+
 ## [0.2.2] — 2026-09-27
 
 ### Added

@@ -67,6 +67,17 @@ public sealed record SbomComponent
     public IReadOnlyList<SbomComponentVulnerability>? Vulnerabilities { get; init; }
     /// <summary>Algorithm → hash dict (e.g. <c>{ "SHA-256": "..." }</c>).</summary>
     public IReadOnlyDictionary<string, string>? Hashes { get; init; }
+    /// <summary>
+    /// Whether this component is a dev/build-only dependency (test SDKs, analyzer closures like
+    /// <c>Microsoft.NETCore.Platforms</c>, the <c>System.*</c> shims) rather than something that ships.
+    /// Drives tamp-findings' SBOM-staleness <b>VEX exemption</b> (TFND-226): a group of dev components
+    /// can be exempted from the freshness gate. A <b>fact</b> (what the build graph ships), not a policy
+    /// decision — findings decides whether to exempt. The mapper only sees the CycloneDX package graph,
+    /// so compute dev-vs-shipping from your build (e.g. per-project <c>project.assets.json</c>) and pass a
+    /// predicate to <see cref="CycloneDxSbomMapper.FromCycloneDx"/> / <c>BuildRequest</c>. Serialized as
+    /// camelCase <c>devDependency</c>; <b>omitted when null</b> (adopters who don't classify stay unaffected).
+    /// </summary>
+    public bool? DevDependency { get; init; }
 }
 
 /// <summary>Optional per-component vulnerability inlined in the SBOM (preferred path = <c>/sbom-vulnerabilities/upsert</c>).</summary>
