@@ -95,6 +95,7 @@ Every endpoint takes the flat hierarchy tuple inline in the body. No query param
 | `PostTestResultsAsync` | POST | `/ingest/test-results` | `TestResultsIngestRequest` (hierarchy + `suites[].cases[]` tree) |
 | `PostScanRunsAsync` | POST | `/ingest/scan-runs` | `ScanRunsIngestRequest` (hierarchy + `receipts[]`) |
 | `PostSbomVulnerabilitiesUpsertAsync` | POST | `/sbom-vulnerabilities/upsert` *(no `/ingest/` prefix)* | `SbomVulnerabilitiesUpsertRequest` (`snapshotId` + `vulnerabilities[]`) → `SbomVulnerabilitiesUpsertResponse` |
+| `PostPostureAsync` | POST | `/ingest/posture` | `PostureIngestRequest` (`client` + `project` + `source` + `observations[]`; **no build/commit hierarchy** — posture is repo/org-scoped) |
 
 ## Mapper helpers
 

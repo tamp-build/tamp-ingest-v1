@@ -126,6 +126,21 @@ public sealed class TampIngestClient : TampApiClient
         return PostJsonAsync<SbomVulnerabilitiesUpsertResponse>("/sbom-vulnerabilities/upsert", request, ct);
     }
 
+    /// <summary>
+    /// <c>POST /ingest/posture</c> — push repo/org security-posture observations (spec v1.3 §2.8, TAM-290).
+    /// </summary>
+    /// <remarks>
+    /// Posture is repo/org-scoped, so <see cref="PostureIngestRequest"/> carries no build/commit hierarchy.
+    /// Post the full observation set every run and report facts (including <see cref="PostureStatus.Unknown"/>)
+    /// rather than judgements — findings owns gating. An unknown <see cref="PostureObservation.CheckId"/>
+    /// rejects the whole batch with <c>400</c>.
+    /// </remarks>
+    public Task PostPostureAsync(PostureIngestRequest request, CancellationToken ct = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+        return PostJsonAsync("/ingest/posture", request, ct);
+    }
+
     private async Task ThrowIfNotSuccessAsync(HttpResponseMessage response, string label, CancellationToken ct)
     {
         if (response.IsSuccessStatusCode) return;
