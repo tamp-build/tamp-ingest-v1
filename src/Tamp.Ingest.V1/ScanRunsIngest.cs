@@ -57,4 +57,6 @@ public sealed record ScanRunsIngestResponse
     public required Guid ComponentVersionId { get; init; }
     /// <summary>Scan-run receipts inserted or replaced.</summary>
     public int ReceiptsUpserted { get; init; }
+    /// <summary>The build the sink resolved this ingest onto (TFND-266). <c>null</c> from sinks that predate the echo.</summary>
+    public ResolvedBuild? Build { get; init; }
 }

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-31
+
+Additive only: no signature changes. Closes [#12](https://github.com/tamp-build/tamp-ingest-v1/issues/12). Shapes come
+from tamp.findings' live `/openapi/v1.json` (server build `0.1.0-alpha+6cd91fc`).
+
+### Added
+
+- **`ResolvedBuild? Build`** on `FindingsIngestResponse`, `SbomIngestResponse`, `CoverageIngestResponse`,
+  `TestResultsIngestResponse` and `ScanRunsIngestResponse` (TFND-266). It is the build the sink **resolved** the ingest onto:
+  `componentVersionId`, `versionString`, `commitSha`, `flavor`, `branch`, `pullRequestRef`, `createdAt`. It is `null` from
+  sinks that predate the echo.
+- **`ReadBuildEvidenceAsync(commitSha, project?, client?, flavor?, pullRequestRef?)`**, wrapping `GET /ingest/builds/{commitSha}`
+  (TFND-265). It returns `BuildEvidenceResponse`: per build, coverage, test results, SBOM, findings per scanner, scan runs, quality
+  gate, container image, analysis coverage, scan usage, and the conformance/diagnostics counts. A `null` section or an empty list
+  means not stored. It returns `null` on 404, because the sink answers 404 for both unknown and out-of-scope commits and never
+  confirms existence. `scanner` and `status` are read as strings, so scanners this client doesn't know yet still deserialize.
+- `FindingsIngestResponse.CvesAttached` / `CvesUnattached`.
+
 ## [0.5.0] — 2026-10-31
 
 TAM-293, from strata-home's nightly post-mortem.

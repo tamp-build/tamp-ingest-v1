@@ -88,4 +88,6 @@ public sealed record CoverageIngestResponse
     public int ClassesCount { get; init; }
     /// <summary>Source files stored.</summary>
     public int SourceFilesCount { get; init; }
+    /// <summary>The build the sink resolved this ingest onto (TFND-266). <c>null</c> from sinks that predate the echo.</summary>
+    public ResolvedBuild? Build { get; init; }
 }

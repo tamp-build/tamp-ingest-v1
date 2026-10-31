@@ -177,6 +177,54 @@ public sealed class TampIngestClient : TampApiClient
         return PostJsonAsync<PostureIngestResponse>("/ingest/posture", request, ct);
     }
 
+    /// <summary>
+    /// <c>GET /ingest/builds/{commitSha}</c>: read back everything the sink holds for a commit (TFND-265). Use it
+    /// for "post, then verify". After the ingest calls, confirm the evidence actually landed on the commit you
+    /// built instead of trusting a 2xx.
+    /// </summary>
+    /// <param name="commitSha">Full sha, or a hex prefix of 7+ characters. Case-insensitive; the sink matches it the same way ingest does.</param>
+    /// <param name="project">Required with a <c>cli_</c> token. Optional with <c>prj_</c>, but must match the token's project if sent.</param>
+    /// <param name="client">Optional client name.</param>
+    /// <param name="flavor">Optional. Narrows to one build flavor.</param>
+    /// <param name="pullRequestRef">Optional. Narrows to one pull-request context.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>
+    /// The evidence, or <c>null</c> on <c>404</c>. The sink answers 404 for both an unknown commit and one outside
+    /// the token's scope, and never confirms existence, so <c>null</c> means "nothing this token can see".
+    /// Other failures throw (<c>400</c> for a malformed sha or a <c>cli_</c> token without
+    /// <paramref name="project"/>, <c>401</c> for a bad token).
+    /// </returns>
+    public async Task<BuildEvidenceResponse?> ReadBuildEvidenceAsync(
+        string commitSha,
+        string? project = null,
+        string? client = null,
+        string? flavor = null,
+        string? pullRequestRef = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(commitSha)) throw new ArgumentException("commitSha must be non-empty.", nameof(commitSha));
+
+        var query = new List<string>(4);
+        void Add(string name, string? value)
+        {
+            if (!string.IsNullOrEmpty(value)) query.Add($"{name}={Uri.EscapeDataString(value)}");
+        }
+        Add("project", project);
+        Add("client", client);
+        Add("flavor", flavor);
+        Add("pullRequestRef", pullRequestRef);
+
+        var uri = $"/ingest/builds/{Uri.EscapeDataString(commitSha.Trim())}" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+        try
+        {
+            return await GetAsync<BuildEvidenceResponse>(uri, ct).ConfigureAwait(false);
+        }
+        catch (ApiClientException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
     private async Task ThrowIfNotSuccessAsync(HttpResponseMessage response, string label, CancellationToken ct)
     {
         if (response.IsSuccessStatusCode) return;
