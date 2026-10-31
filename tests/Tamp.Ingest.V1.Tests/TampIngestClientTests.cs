@@ -43,10 +43,7 @@ public class TampIngestClientTests
     [Fact]
     public async Task EveryRequest_StampsBearerAuthHeader()
     {
-        var (client, handler) = NewClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("{}", Encoding.UTF8, "application/json"),
-        });
+        var (client, handler) = NewClient();   // sink-shaped default: scan-runs returns its ScanRunIngestResponse
 
         await client.PostScanRunsAsync(new ScanRunsIngestRequest
         {

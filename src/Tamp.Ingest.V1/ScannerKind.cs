@@ -89,6 +89,12 @@ public enum ScannerKind
 
     /// <summary>Deque axe-core accessibility scanning.</summary>
     AxeCore,
+
+    /// <summary>ProjectDiscovery Nuclei template-driven DAST scanning (TAM-293; sink-side <c>Nuclei = 23</c>).</summary>
+    Nuclei,
+
+    /// <summary>SonarQube / SonarCloud code-quality + SAST analysis (TAM-293; sink-side <c>SonarQube = 24</c>).</summary>
+    SonarQube,
 }
 
 /// <summary>Wire-format helpers for <see cref="ScannerKind"/>.</summary>
@@ -123,6 +129,8 @@ public static class ScannerKindExtensions
         ScannerKind.ReSharper          => "resharper",
         ScannerKind.ESLint             => "eslint",
         ScannerKind.AxeCore            => "axe-core",
+        ScannerKind.Nuclei             => "nuclei",
+        ScannerKind.SonarQube          => "sonarqube",
         _                              => kind.ToString().ToLowerInvariant(),
     };
 }

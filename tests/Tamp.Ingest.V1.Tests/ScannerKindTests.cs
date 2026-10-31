@@ -28,6 +28,8 @@ public class ScannerKindTests
     [InlineData(ScannerKind.ReSharper,         "resharper")]
     [InlineData(ScannerKind.ESLint,            "eslint")]
     [InlineData(ScannerKind.AxeCore,           "axe-core")]   // hyphenated
+    [InlineData(ScannerKind.Nuclei,            "nuclei")]
+    [InlineData(ScannerKind.SonarQube,         "sonarqube")]
     public void ToWire_MapsEveryEnumMember(ScannerKind kind, string expected)
         => Assert.Equal(expected, kind.ToWire());
 
@@ -54,12 +56,26 @@ public class ScannerKindTests
             "checkov", "tfsec", "kics", "zap", "spectral", "oasdiff",
             "cosign", "netarchtest", "dependency-cruiser", "stryker", "coverlet",
             "osv-scanner", "roslyn", "syft", "grype", "resharper", "eslint", "axe-core",
+            "nuclei", "sonarqube",   // TAM-293
         };
 
         var actual = Enum.GetValues<ScannerKind>().Select(k => k.ToWire()).OrderBy(s => s, StringComparer.Ordinal).ToArray();
         var want   = expected.OrderBy(s => s, StringComparer.Ordinal).ToArray();
         Assert.Equal(want, actual);
     }
+}
+
+public class ScannerKindWireTests
+{
+    // TAM-293: the JSON body carries the enum NAME (IngestJsonOptions' PascalCase string-enum
+    // converter), and tamp.findings parses it by name into its own ScannerKind. Pin the exact
+    // tokens the sink expects (Nuclei = 23, SonarQube = 24 server-side), so a Nuclei DAST
+    // producer no longer has to push Unknown + subCategory "dast".
+    [Theory]
+    [InlineData(ScannerKind.Nuclei,    "\"Nuclei\"")]
+    [InlineData(ScannerKind.SonarQube, "\"SonarQube\"")]
+    public void Serializes_By_Name_For_The_Sink(ScannerKind kind, string expectedJson)
+        => Assert.Equal(expectedJson, System.Text.Json.JsonSerializer.Serialize(kind, IngestJsonOptions.Default));
 }
 
 public class SeverityTests

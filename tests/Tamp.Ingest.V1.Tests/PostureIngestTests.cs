@@ -20,13 +20,7 @@ public class PostureIngestTests
 
     private static (TampIngestClient client, CapturingHandler handler) NewClient()
     {
-        var handler = new CapturingHandler
-        {
-            Responder = _ => new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json"),
-            },
-        };
+        var handler = new CapturingHandler();   // default responder returns the sink's PostureIngestResponse shape
         var http = new HttpClient(handler);
         return (new TampIngestClient(BaseUri, Token, http), handler);
     }

@@ -49,3 +49,12 @@ public enum ScanRunStatus
     /// <summary>Scanner intentionally skipped (toolchain not installed, repo opted out, etc.).</summary>
     Skipped,
 }
+
+/// <summary>Response from <c>POST /ingest/scan-runs</c> (spec v1.2 §2.6): which build the receipts landed on and how many were upserted (TAM-293).</summary>
+public sealed record ScanRunsIngestResponse
+{
+    /// <summary>Sink-assigned ComponentVersion id, i.e. the build the receipts landed on.</summary>
+    public required Guid ComponentVersionId { get; init; }
+    /// <summary>Scan-run receipts inserted or replaced.</summary>
+    public int ReceiptsUpserted { get; init; }
+}

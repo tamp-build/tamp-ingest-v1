@@ -89,13 +89,25 @@ Every endpoint takes the flat hierarchy tuple inline in the body. No query param
 | Method | HTTP | Path | Body root |
 |---|---|---|---|
 | `PostSbomAsync` | POST | `/ingest/sbom` | `SbomIngestRequest` (hierarchy + `components[]` + `dependencies[]`) → `SbomIngestResponse` |
-| `PostSbomProvenanceAsync` | POST | `/ingest/sbom-snapshots/{snapshotId}/provenance` | Raw SLSA / in-toto / DSSE provenance JSON |
+| `PostSbomProvenanceAsync` | POST | `/ingest/sbom-snapshots/{snapshotId}/provenance` | Raw SLSA / in-toto / DSSE provenance JSON → `SbomProvenanceResponse` |
 | `PostFindingsAsync` | POST | `/ingest/findings` | `FindingsIngestRequest` (hierarchy + `scanner` + `findings[]`) → `FindingsIngestResponse` |
-| `PostCoverageAsync` | POST | `/ingest/coverage` | `CoverageIngestRequest` (hierarchy + `modules[].classes[]` tree) |
-| `PostTestResultsAsync` | POST | `/ingest/test-results` | `TestResultsIngestRequest` (hierarchy + `suites[].cases[]` tree) |
-| `PostScanRunsAsync` | POST | `/ingest/scan-runs` | `ScanRunsIngestRequest` (hierarchy + `receipts[]`) |
+| `PostCoverageAsync` | POST | `/ingest/coverage` | `CoverageIngestRequest` (hierarchy + `modules[].classes[]` tree) → `CoverageIngestResponse` |
+| `PostTestResultsAsync` | POST | `/ingest/test-results` | `TestResultsIngestRequest` (hierarchy + `suites[].cases[]` tree) → `TestResultsIngestResponse` |
+| `PostScanRunsAsync` | POST | `/ingest/scan-runs` | `ScanRunsIngestRequest` (hierarchy + `receipts[]`) → `ScanRunsIngestResponse` |
 | `PostSbomVulnerabilitiesUpsertAsync` | POST | `/sbom-vulnerabilities/upsert` *(no `/ingest/` prefix)* | `SbomVulnerabilitiesUpsertRequest` (`snapshotId` + `vulnerabilities[]`) → `SbomVulnerabilitiesUpsertResponse` |
-| `PostPostureAsync` | POST | `/ingest/posture` | `PostureIngestRequest` (`client` + `project` + `source` + `observations[]`; **no build/commit hierarchy** — posture is repo/org-scoped) |
+| `PostPostureAsync` | POST | `/ingest/posture` | `PostureIngestRequest` (`client` + `project` + `source` + `observations[]`; **no build/commit hierarchy** — posture is repo/org-scoped) → `PostureIngestResponse` |
+
+Every method returns the sink's typed response (0.5.0+). Log it: it tells you **what was stored and which build
+(`ComponentVersionId`) it landed on**, not just what you sent.
+
+### Timeouts (0.5.0+)
+
+`TampIngestClient` sets `RequestTimeout` to `TampIngestClient.DefaultIngestTimeout` (**5 minutes**), because
+replace-on-ingest calls with large SBOMs or coverage trees can legitimately run long. You can change it per instance.
+Failures state the elapsed time, the endpoint and the innermost cause (Tamp.Http 0.2.0, TAM-294).
+
+> **If you pass your own `HttpClient`**, its `Timeout` (100 s by default) still applies and wins when it's shorter.
+> Either don't pass one, or set `http.Timeout = Timeout.InfiniteTimeSpan` so that `RequestTimeout` governs.
 
 ## Mapper helpers
 
