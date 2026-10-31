@@ -34,9 +34,36 @@ public sealed class TampIngestClient : TampApiClient
     /// <param name="baseUri">The ingest sink base URI (e.g. <c>https://tamp-findings.brewingcoder.com</c>).</param>
     /// <param name="token">Bearer token (<c>cli_</c>… or <c>prj_</c>…).</param>
     /// <param name="httpClient">Optional shared <see cref="HttpClient"/>. When null the client owns its own.</param>
+    /// <remarks>
+    /// <see cref="TampApiClient.RequestTimeout"/> defaults to <see cref="DefaultIngestTimeout"/>. If you pass
+    /// <paramref name="httpClient"/>, its own <see cref="HttpClient.Timeout"/> (100 s unless you changed it)
+    /// still applies and wins when shorter. A timeout from it is reported as such (Tamp.Http
+    /// <see cref="ApiTimeoutException.IsHttpClientTimeout"/>).
+    /// </remarks>
     public TampIngestClient(Uri baseUri, Secret token, HttpClient? httpClient = null)
-        : base(baseUri, ApiCredential.Bearer(token), http: httpClient, userAgent: "Tamp.Ingest.V1/0.2.0")
+        : base(baseUri, ApiCredential.Bearer(token), http: httpClient, userAgent: UserAgent)
     {
+        RequestTimeout = DefaultIngestTimeout;
+    }
+
+    /// <summary>
+    /// Default per-request limit for ingest calls: 5 minutes (TAM-294). Replace-on-ingest uploads with large SBOMs
+    /// or coverage trees can legitimately run longer than HttpClient's 100 s. Change it per instance through
+    /// <see cref="TampApiClient.RequestTimeout"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultIngestTimeout = TimeSpan.FromMinutes(5);
+
+    private static readonly string UserAgent = "Tamp.Ingest.V1/" + PackageVersion();
+
+    private static string PackageVersion()
+    {
+        var info = typeof(TampIngestClient).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+        if (string.IsNullOrEmpty(info)) return typeof(TampIngestClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        var plus = info.IndexOf('+');   // strip SourceLink's "+<commit sha>" build metadata
+        return plus >= 0 ? info[..plus] : info;
     }
 
     /// <inheritdoc />
@@ -63,7 +90,8 @@ public sealed class TampIngestClient : TampApiClient
     /// <c>POST /ingest/sbom-snapshots/{snapshotId}/provenance</c> — attach SLSA / in-toto / DSSE
     /// provenance to a previously-ingested SBOM snapshot (spec v1.2 §2.2).
     /// </summary>
-    public async Task PostSbomProvenanceAsync(Guid snapshotId, string provenanceJson, CancellationToken ct = default)
+    /// <returns>The attestation the sink now holds: the snapshot, the detected provenance type and the upload time.</returns>
+    public async Task<SbomProvenanceResponse> PostSbomProvenanceAsync(Guid snapshotId, string provenanceJson, CancellationToken ct = default)
     {
         if (snapshotId == Guid.Empty) throw new ArgumentException("snapshotId must be non-empty.", nameof(snapshotId));
         if (string.IsNullOrEmpty(provenanceJson)) throw new ArgumentException("provenanceJson must be non-empty.", nameof(provenanceJson));
@@ -75,6 +103,14 @@ public sealed class TampIngestClient : TampApiClient
         };
         using var response = await SendRawAsync(request, ct: ct).ConfigureAwait(false);
         await ThrowIfNotSuccessAsync(response, "POST " + uri, ct).ConfigureAwait(false);
+
+        var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(body))
+            throw new ApiException(response.StatusCode, response.RequestMessage?.RequestUri?.ToString(), HttpMethod.Post.Method, null,
+                $"Expected JSON body for POST {uri} but response was empty.");
+        return System.Text.Json.JsonSerializer.Deserialize<SbomProvenanceResponse>(body, JsonOptions)
+            ?? throw new ApiException(response.StatusCode, response.RequestMessage?.RequestUri?.ToString(), HttpMethod.Post.Method, body,
+                $"JSON for POST {uri} deserialized to null.");
     }
 
     /// <summary><c>POST /ingest/findings</c> — push a flat findings array (spec v1.2 §2.3).</summary>
@@ -94,24 +130,24 @@ public sealed class TampIngestClient : TampApiClient
         => PostFindingsAsync(SarifFindingsMapper.BuildRequest(hierarchy, scanner, log, defaultSubCategory), ct);
 
     /// <summary><c>POST /ingest/coverage</c> — push the normalized coverage rollup (spec v1.2 §2.4).</summary>
-    public Task PostCoverageAsync(CoverageIngestRequest request, CancellationToken ct = default)
+    public Task<CoverageIngestResponse> PostCoverageAsync(CoverageIngestRequest request, CancellationToken ct = default)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
-        return PostJsonAsync("/ingest/coverage", request, ct);
+        return PostJsonAsync<CoverageIngestResponse>("/ingest/coverage", request, ct);
     }
 
     /// <summary><c>POST /ingest/test-results</c> — push the normalized test-result rollup (spec v1.2 §2.5).</summary>
-    public Task PostTestResultsAsync(TestResultsIngestRequest request, CancellationToken ct = default)
+    public Task<TestResultsIngestResponse> PostTestResultsAsync(TestResultsIngestRequest request, CancellationToken ct = default)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
-        return PostJsonAsync("/ingest/test-results", request, ct);
+        return PostJsonAsync<TestResultsIngestResponse>("/ingest/test-results", request, ct);
     }
 
     /// <summary><c>POST /ingest/scan-runs</c> — push per-scanner receipts (spec v1.2 §2.6).</summary>
-    public Task PostScanRunsAsync(ScanRunsIngestRequest request, CancellationToken ct = default)
+    public Task<ScanRunsIngestResponse> PostScanRunsAsync(ScanRunsIngestRequest request, CancellationToken ct = default)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
-        return PostJsonAsync("/ingest/scan-runs", request, ct);
+        return PostJsonAsync<ScanRunsIngestResponse>("/ingest/scan-runs", request, ct);
     }
 
     /// <summary>
@@ -135,10 +171,10 @@ public sealed class TampIngestClient : TampApiClient
     /// rather than judgements — findings owns gating. An unknown <see cref="PostureObservation.CheckId"/>
     /// rejects the whole batch with <c>400</c>.
     /// </remarks>
-    public Task PostPostureAsync(PostureIngestRequest request, CancellationToken ct = default)
+    public Task<PostureIngestResponse> PostPostureAsync(PostureIngestRequest request, CancellationToken ct = default)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
-        return PostJsonAsync("/ingest/posture", request, ct);
+        return PostJsonAsync<PostureIngestResponse>("/ingest/posture", request, ct);
     }
 
     private async Task ThrowIfNotSuccessAsync(HttpResponseMessage response, string label, CancellationToken ct)

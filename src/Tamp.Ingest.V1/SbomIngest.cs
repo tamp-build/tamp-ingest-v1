@@ -108,3 +108,14 @@ public sealed record SbomIngestResponse
     public int DependenciesCount { get; init; }
     public int VulnerabilitiesCount { get; init; }
 }
+
+/// <summary>Response from <c>POST /ingest/sbom-snapshots/{snapshotId}/provenance</c> (spec v1.2 §2.2): the attestation the sink now holds (TAM-293).</summary>
+public sealed record SbomProvenanceResponse
+{
+    /// <summary>The SBOM snapshot the provenance was attached to.</summary>
+    public required Guid SnapshotId { get; init; }
+    /// <summary>Sink-detected provenance type (e.g. a DSSE envelope or SLSA statement), when it recognized one.</summary>
+    public string? ProvenanceType { get; init; }
+    /// <summary>When the sink stored the provenance.</summary>
+    public DateTimeOffset? UploadedAt { get; init; }
+}

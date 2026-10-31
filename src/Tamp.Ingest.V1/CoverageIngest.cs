@@ -71,3 +71,21 @@ public sealed record CoverageSourceFile
     public required string RelativePath { get; init; }
     public required string SourceText { get; init; }
 }
+
+/// <summary>
+/// Response from <c>POST /ingest/coverage</c> (spec v1.2 §2.4). Tells you what the sink stored and which
+/// build it landed on (TAM-293). Before this type existed, a producer could log only what it sent.
+/// </summary>
+public sealed record CoverageIngestResponse
+{
+    /// <summary>Sink-assigned ComponentVersion id, i.e. the build the report landed on.</summary>
+    public required Guid ComponentVersionId { get; init; }
+    /// <summary>Sink-assigned coverage report id.</summary>
+    public required Guid CoverageReportId { get; init; }
+    /// <summary>Modules stored.</summary>
+    public int ModulesCount { get; init; }
+    /// <summary>Classes stored.</summary>
+    public int ClassesCount { get; init; }
+    /// <summary>Source files stored.</summary>
+    public int SourceFilesCount { get; init; }
+}

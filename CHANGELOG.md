@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-31
+
+TAM-293, from strata-home's nightly post-mortem.
+
+### Changed (source-compatible; recompile required)
+
+- **Every ingest method now returns the sink's typed response** instead of a bare `Task`. A producer can now log what
+  was stored and which build it landed on, not just what it sent. Shapes are taken field for field from tamp.findings'
+  `*IngestResponse` records:
+  - `PostCoverageAsync` → `CoverageIngestResponse` (`componentVersionId`, `coverageReportId`, `modulesCount`, `classesCount`, `sourceFilesCount`)
+  - `PostTestResultsAsync` → `TestResultsIngestResponse` (`componentVersionId`, `testRunReportId`, `suitesCount`, `casesCount`)
+  - `PostScanRunsAsync` → `ScanRunsIngestResponse` (`componentVersionId`, `receiptsUpserted`)
+  - `PostPostureAsync` → `PostureIngestResponse` (`projectId`, `accepted`, `created`, `updated`)
+  - `PostSbomProvenanceAsync` → `SbomProvenanceResponse` (`snapshotId`, `provenanceType`, `uploadedAt`)
+
+  `await client.PostCoverageAsync(...)` call sites compile unchanged. The method signatures changed, so already-compiled
+  callers must rebuild against 0.5.0. A 2xx response with an empty body, or one missing the required id, now throws
+  instead of passing silently.
+- **`TampIngestClient` defaults `RequestTimeout` to 5 minutes** (`DefaultIngestTimeout`), suited to long replace-on-ingest
+  calls. It is enforced by Tamp.Http 0.2.0 (TAM-294), whose failures state the elapsed time, the endpoint and the
+  innermost cause. An injected `HttpClient`'s own `Timeout` still applies, and the error names it when it fires.
+- User-Agent now reports the real package version (it was hard-coded `Tamp.Ingest.V1/0.2.0`).
+
+### Added
+
+- `ScannerKind.Nuclei` (sink `Nuclei = 23`) and `ScannerKind.SonarQube` (sink `SonarQube = 24`). They go on the wire by
+  name, so a Nuclei DAST producer no longer has to push `Unknown` + subCategory `"dast"`.
+
+### Dependencies
+
+- Tamp.Http 0.1.1 → 0.2.0, and Tamp.Core 1.17.2 → 1.17.3 (Tamp.Http 0.2.0 requires `Tamp.Core >= 1.17.3`).
+
+## [0.4.0] — 2026-10-29
+
+### Added
+
+- **`POST /ingest/posture`** (TAM-290): `PostPostureAsync` plus `PostureIngestRequest` / `PostureObservation` / `PostureStatus`.
+  Repo/org security-posture facts with no build hierarchy. The status is serialized to the sink's lowercase-hyphenated tokens
+  (`not-applicable`) via a property-level converter.
+
 ## [0.3.0] — 2026-10-12
 
 ### Added

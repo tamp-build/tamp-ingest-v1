@@ -111,3 +111,16 @@ internal sealed class PostureStatusJsonConverter : JsonConverter<PostureStatus>
             _ => throw new JsonException($"Unhandled posture status '{value}'."),
         });
 }
+
+/// <summary>Response from <c>POST /ingest/posture</c> (spec v1.3 §2.8): how the observation set was applied (TAM-293).</summary>
+public sealed record PostureIngestResponse
+{
+    /// <summary>Sink-side Project id the observations were recorded against.</summary>
+    public required Guid ProjectId { get; init; }
+    /// <summary>Observations accepted from this batch.</summary>
+    public int Accepted { get; init; }
+    /// <summary>Checks seen for the first time on this project.</summary>
+    public int Created { get; init; }
+    /// <summary>Checks whose stored observation was replaced.</summary>
+    public int Updated { get; init; }
+}

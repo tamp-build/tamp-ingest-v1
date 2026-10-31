@@ -67,3 +67,16 @@ public enum TestOutcome
     Skipped,
     Inconclusive,
 }
+
+/// <summary>Response from <c>POST /ingest/test-results</c> (spec v1.2 §2.5): what the sink stored and which build it landed on (TAM-293).</summary>
+public sealed record TestResultsIngestResponse
+{
+    /// <summary>Sink-assigned ComponentVersion id, i.e. the build the results landed on.</summary>
+    public required Guid ComponentVersionId { get; init; }
+    /// <summary>Sink-assigned test-run report id.</summary>
+    public required Guid TestRunReportId { get; init; }
+    /// <summary>Suites stored.</summary>
+    public int SuitesCount { get; init; }
+    /// <summary>Test cases stored.</summary>
+    public int CasesCount { get; init; }
+}
