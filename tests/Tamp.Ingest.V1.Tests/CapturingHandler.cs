@@ -29,7 +29,7 @@ internal sealed class CapturingHandler : HttpMessageHandler
         var json = path switch
         {
             "/ingest/coverage" =>
-                $$"""{"componentVersionId":"{{ComponentVersionId}}","coverageReportId":"{{ReportId}}","modulesCount":3,"classesCount":41,"sourceFilesCount":17}""",
+                $$"""{"componentVersionId":"{{ComponentVersionId}}","coverageReportId":"{{ReportId}}","modulesCount":3,"classesCount":41,"sourceFilesCount":17,"build":{"componentVersionId":"{{ComponentVersionId}}","versionString":"1.2.3","commitSha":"6651019abcdef6651019abcdef6651019abcdef0","flavor":null,"branch":"main","pullRequestRef":null,"createdAt":"2026-10-31T15:00:00+00:00"} }""",
             "/ingest/test-results" =>
                 $$"""{"componentVersionId":"{{ComponentVersionId}}","testRunReportId":"{{ReportId}}","suitesCount":2,"casesCount":56}""",
             "/ingest/scan-runs" =>

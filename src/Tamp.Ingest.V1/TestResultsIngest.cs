@@ -79,4 +79,6 @@ public sealed record TestResultsIngestResponse
     public int SuitesCount { get; init; }
     /// <summary>Test cases stored.</summary>
     public int CasesCount { get; init; }
+    /// <summary>The build the sink resolved this ingest onto (TFND-266). <c>null</c> from sinks that predate the echo.</summary>
+    public ResolvedBuild? Build { get; init; }
 }

@@ -96,9 +96,22 @@ Every endpoint takes the flat hierarchy tuple inline in the body. No query param
 | `PostScanRunsAsync` | POST | `/ingest/scan-runs` | `ScanRunsIngestRequest` (hierarchy + `receipts[]`) → `ScanRunsIngestResponse` |
 | `PostSbomVulnerabilitiesUpsertAsync` | POST | `/sbom-vulnerabilities/upsert` *(no `/ingest/` prefix)* | `SbomVulnerabilitiesUpsertRequest` (`snapshotId` + `vulnerabilities[]`) → `SbomVulnerabilitiesUpsertResponse` |
 | `PostPostureAsync` | POST | `/ingest/posture` | `PostureIngestRequest` (`client` + `project` + `source` + `observations[]`; **no build/commit hierarchy** — posture is repo/org-scoped) → `PostureIngestResponse` |
+| `ReadBuildEvidenceAsync` | **GET** | `/ingest/builds/{commitSha}` (full sha or 7+ hex prefix; `?project=&client=&flavor=&pullRequestRef=`) | none → `BuildEvidenceResponse?` (everything the sink holds per build; `null` on 404) |
 
 Every method returns the sink's typed response (0.5.0+). Log it: it tells you **what was stored and which build
 (`ComponentVersionId`) it landed on**, not just what you sent.
+
+### Post, then verify (0.6.0+)
+
+Single-build responses carry `Build` (`ResolvedBuild`): the build the sink **resolved** your ingest onto. After posting,
+`ReadBuildEvidenceAsync(commitSha)` reads back everything the sink holds for that commit. A `null` section or an empty
+list means it was **not stored**, so a pipeline can fail loudly instead of trusting a 2xx:
+
+```csharp
+var evidence = await ingest.ReadBuildEvidenceAsync(commitSha, project: "tamp-core");
+var build = evidence?.Builds.SingleOrDefault(b => b.Build.Flavor is null && b.Build.PullRequestRef is null);
+if (build?.Coverage is null || build.TestResults is null) throw new Exception("ingest did not land");
+```
 
 ### Timeouts (0.5.0+)
 

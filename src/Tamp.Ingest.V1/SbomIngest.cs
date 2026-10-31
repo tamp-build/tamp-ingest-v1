@@ -107,6 +107,8 @@ public sealed record SbomIngestResponse
     public int ComponentsCount { get; init; }
     public int DependenciesCount { get; init; }
     public int VulnerabilitiesCount { get; init; }
+    /// <summary>The build the sink resolved this ingest onto (TFND-266). <c>null</c> from sinks that predate the echo.</summary>
+    public ResolvedBuild? Build { get; init; }
 }
 
 /// <summary>Response from <c>POST /ingest/sbom-snapshots/{snapshotId}/provenance</c> (spec v1.2 §2.2): the attestation the sink now holds (TAM-293).</summary>

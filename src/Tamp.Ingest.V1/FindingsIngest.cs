@@ -73,4 +73,10 @@ public sealed record FindingsIngestResponse
     public int FindingsReopened { get; init; }
     public int FindingsClosed { get; init; }
     public int FindingsSuppressed { get; init; }
+    /// <summary>CVEs attached to SBOM components from these findings.</summary>
+    public int CvesAttached { get; init; }
+    /// <summary>CVE findings that matched no SBOM component.</summary>
+    public int CvesUnattached { get; init; }
+    /// <summary>The build the sink resolved this ingest onto (TFND-266). <c>null</c> from sinks that predate the echo.</summary>
+    public ResolvedBuild? Build { get; init; }
 }
